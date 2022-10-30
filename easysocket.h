@@ -23,7 +23,9 @@
 
     //Functions Pre-Declaration: TCP
     int tcp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote);
+    int tcp_init_client_with_timeout(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote, int timeoutmillis);
     int tcp_init_server(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog);
+    int tcp_init_server_with_timeout(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog, int timeoutmillis);
     int tcp_accept(EasySocket* serverSocketStructure, EasySocket* socketStructure, struct sockaddr_in* remote);
     int tcp_receive(EasySocket* socketStructure, void* buffer, int bufferSize);
     int tcp_send(EasySocket* socketStructure, void* buffer, int bufferSize);
@@ -32,7 +34,9 @@
 
     //Functions Pre-Declaration: UDP
 	int udp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote);
+    int udp_init_client_with_timeout(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote, int timeoutmillis);
 	int udp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local);
+    int udp_init_server_with_timeout(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local, int timeoutmillis);
 	int udp_receive(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote);
 	int udp_send(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote);
 	void udp_close(EasySocket* socketStructure);
@@ -88,6 +92,54 @@
 
         return 0;
     }
+    int tcp_init_client_with_timeout(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote, int timeoutmillis){
+        
+        //Starting Up WSA
+        struct WSAData data;
+        if(WSAStartup( MAKEWORD(2, 2), &data) != 0) {
+            printf("WSA Startup Failed. Error Code: %d\n",WSAGetLastError());
+            return WSAGetLastError();
+        }
+
+        //Creating Socket
+        if ((socketStructure->socketFD = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
+            printf("Cannot create socket: %d\n", WSAGetLastError());
+            tcp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+        char buffer[32];
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_RCVTIMEO, itoa(timeoutmillis,buffer,10), sizeof(timeoutmillis));
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_SNDTIMEO, itoa(timeoutmillis,buffer,10), sizeof(timeoutmillis));
+
+        //Preparing Local Structure
+		memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(INADDR_ANY);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+
+        //Binding Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR) {
+            printf("Cannot bind socket: %d\n", WSAGetLastError());
+            tcp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+		//Preparing Remote Structure
+        memset(remote, 0, sizeof(*remote));
+        remote->sin_family = AF_INET;
+        remote->sin_addr.S_un.S_addr = inet_addr(serviceName);
+        remote->sin_port = htons(servicePort);
+
+        //Connecting to Server
+        if (connect(socketStructure->socketFD, (struct sockaddr*)remote, sizeof(*remote)) == SOCKET_ERROR) {
+            printf("Cannot connect to server: %d\n", WSAGetLastError());
+            tcp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+        return 0;
+    }
     int tcp_init_server(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog){
 
         //Starting Up WSA
@@ -103,6 +155,44 @@
             tcp_close(serverSocketStructure);
             return WSAGetLastError();
         }
+
+        //Preparing Server Structure
+		memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(servicePort);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+        
+        //Binding Socket to Local Structure
+        if (bind(serverSocketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR) {
+            printf("Cannot bind socket: %d\n", WSAGetLastError());
+            tcp_close(serverSocketStructure);
+            return WSAGetLastError();
+        }
+
+        //Turning ServerSocket in Listening
+        listen(serverSocketStructure->socketFD, backlog);
+
+        return 0;
+    }
+    int tcp_init_server_with_timeout(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog, int timeoutmillis){
+
+        //Starting Up WSA
+        struct WSAData data;
+        if(WSAStartup( MAKEWORD(2, 2), &data) != 0) {
+            printf("WSA Startup Failed. Error Code: %d\n",WSAGetLastError());
+            return WSAGetLastError();
+        }
+
+        //Creating Socket
+        if ((serverSocketStructure->socketFD = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
+            printf("Cannot create socket: %d\n", WSAGetLastError());
+            tcp_close(serverSocketStructure);
+            return WSAGetLastError();
+        }
+
+        char buffer[32];
+        setsockopt(serverSocketStructure->socketFD, SOL_SOCKET, SO_RCVTIMEO, itoa(timeoutmillis,buffer,10), sizeof(timeoutmillis));
+        setsockopt(serverSocketStructure->socketFD, SOL_SOCKET, SO_SNDTIMEO, itoa(timeoutmillis,buffer,10), sizeof(timeoutmillis));
 
         //Preparing Server Structure
 		memset(local, 0, sizeof(*local));
@@ -183,6 +273,47 @@
 
         return 0;
     }
+    int udp_init_client_with_timeout(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote, int timeoutmillis){
+        
+        //Starting Up WSA
+        struct WSAData data;
+        if(WSAStartup( MAKEWORD(2, 2), &data) != 0) {
+            printf("WSA Startup Failed. Error Code: %d\n",WSAGetLastError());
+            return WSAGetLastError();
+        }
+
+        //Creating Socket
+        if((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
+            printf("Cannot create socket: %d\n", WSAGetLastError());
+            udp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+        char buffer[32];
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_RCVTIMEO, itoa(timeoutmillis,buffer,10), sizeof(timeoutmillis));
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_SNDTIMEO, itoa(timeoutmillis,buffer,10), sizeof(timeoutmillis));
+
+        //Preparing Local Structure
+        memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(INADDR_ANY);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+
+        //Binding Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR) {
+            printf("Could not bind socket: %d\n", WSAGetLastError());
+            udp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+        //Preparing Remote Structure
+        memset(remote, 0, sizeof(*remote));
+        remote->sin_family = AF_INET;
+        remote->sin_addr.S_un.S_addr = inet_addr(serviceName);
+        remote->sin_port = htons(servicePort);
+
+        return 0;
+    }
     int udp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local){
 
         //Starting Up WSA
@@ -198,6 +329,41 @@
             udp_close(socketStructure);
             return WSAGetLastError();
         }
+
+        //Preparing Server Structure
+        memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_addr.s_addr = ADDR_ANY;
+        local->sin_port = htons(servicePort);
+
+        //Bind Socket to Local Structure
+        if(bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR) {
+            printf("Cannot bind socket: %d\n", WSAGetLastError());
+            udp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+        return 0;
+    }
+    int udp_init_server_with_timeout(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local, int timeoutmillis){
+
+        //Starting Up WSA
+        struct WSAData data;
+        if(WSAStartup(MAKEWORD(2,2), &data) != 0) {
+            printf("Failed. Error Code: %d\n", WSAGetLastError());
+            return WSAGetLastError();
+        }
+
+        //Creating Socket
+        if((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
+            printf("Could not create socket: %d\n", WSAGetLastError());
+            udp_close(socketStructure);
+            return WSAGetLastError();
+        }
+        
+        char buffer[32];
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_RCVTIMEO, itoa(timeoutmillis,buffer,10), sizeof(timeoutmillis));
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_SNDTIMEO, itoa(timeoutmillis,buffer,10), sizeof(timeoutmillis));
 
         //Preparing Server Structure
         memset(local, 0, sizeof(*local));
@@ -262,7 +428,9 @@
 
     //Functions Pre-Declaration: TCP
     int tcp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote);
-    int tcp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local, int backlog);
+    int tcp_init_client_with_timeout(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote, int timeoutmillis);
+    int tcp_init_server(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog);
+    int tcp_init_server_with_timeout(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog, int timeoutmillis);
     int tcp_accept(EasySocket* serverSocketStructure, EasySocket* socketStructure, struct sockaddr_in* remote);
     int tcp_receive(EasySocket* socketStructure, void* buffer, int bufferSize);
     int tcp_send(EasySocket* socketStructure, void* buffer, int bufferSize);
@@ -271,7 +439,9 @@
 
     //Functions Pre-Declaration: UDP
 	int udp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote);
+    int udp_init_client_with_timeout(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote, int timeoutmillis);
 	int udp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local);
+    int udp_init_server_with_timeout(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local, int timeoutmillis);
 	int udp_receive(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote);
 	int udp_send(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote);
 	void udp_close(EasySocket* socketStructure);
@@ -322,6 +492,52 @@
 
         return 0;
     }
+    int tcp_init_client_with_timeout(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote, int timeoutmillis){
+
+        struct hostent *h;
+
+        //Creating Socket
+        if ((socketStructure->socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+            perror ("Creazione Socket: ");
+            return -1;
+        }
+
+        struct timeval timeout;
+        timeout.tv_sec = timeoutmillis/1000;
+        timeoutmillis -= timeoutmillis/1000;
+        timeout.tv_usec = timeoutmillis*1000;
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+        //Preparing Local Structure
+		memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(INADDR_ANY);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+
+        //Bind Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
+            perror ("errore Bind: ");
+            tcp_close(socketStructure);
+            return -2;
+        }
+
+        //Preparing Remote Structure
+		memset(remote, 0, sizeof(*remote));
+        remote->sin_family = AF_INET;
+        remote->sin_port = htons(servicePort);
+        h = gethostbyname(serviceName);
+        remote->sin_addr.s_addr = *((int*) h->h_addr_list[0]);
+
+        //Connecting to Server
+        if (connect (socketStructure->socketFD, (struct sockaddr*)remote, sizeof(*remote)) < 0) {
+            perror("errore Sendro: ");
+            tcp_close(socketStructure);
+            return -3;
+        }
+
+        return 0;
+    }
     int tcp_init_server(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog){
 
         //Creating Socket
@@ -329,6 +545,39 @@
             perror("Creazione Socket: ");
             return -1;
         }
+
+        //Preparing Local Structure
+		memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(servicePort);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+        
+        //Bind Socket to Local Structure
+        if(bind(serverSocketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
+            perror("errore Bind: ");
+            tcp_close(serverSocketStructure);
+            return -2;
+        }
+
+        //Turning ServerSocket in Listening
+        listen(serverSocketStructure->socketFD, backlog);
+
+        return 0;
+    }
+    int tcp_init_server_with_timeout(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog, int timeoutmillis){
+
+        //Creating Socket
+        if ((serverSocketStructure->socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+            perror("Creazione Socket: ");
+            return -1;
+        }
+
+        struct timeval timeout;
+        timeout.tv_sec = timeoutmillis/1000;
+        timeoutmillis -= timeoutmillis/1000;
+        timeout.tv_usec = timeoutmillis*1000;
+        setsockopt(serverSocketStructure->socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(serverSocketStructure->socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
         //Preparing Local Structure
 		memset(local, 0, sizeof(*local));
@@ -403,6 +652,45 @@
 
         return 0;
     }
+    int udp_init_client_with_timeout(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote, int timeoutmillis){
+
+        struct hostent *h;
+
+        //Creating Socket
+        if((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+            perror("Socket Creation Error: ");
+            return -1;
+        }
+
+        struct timeval timeout;
+        timeout.tv_sec = timeoutmillis/1000;
+        timeoutmillis -= timeoutmillis/1000;
+        timeout.tv_usec = timeoutmillis*1000;
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+        //Preparing Local Structure
+        memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;                
+        local->sin_port = htons(INADDR_ANY);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+        
+        //Binding Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
+            perror("Binding Error: ");
+            udp_close(socketStructure);
+            return -2;
+        }
+
+        //Preparing Remote Structure
+        memset(remote, 0, sizeof(*remote));
+        remote->sin_family = AF_INET;
+        remote->sin_port = htons(servicePort);
+        h = gethostbyname(serviceName);
+        remote->sin_addr.s_addr = *((int*) h->h_addr_list[0]);
+
+        return 0;
+    }
     int udp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local){
         
         //Creating Socket
@@ -425,7 +713,36 @@
         }
 
         return 0;
+    }
+    int udp_init_server_with_timeout(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local, int timeoutmillis){
+
+        //Creating Socket
+        if ((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+            perror("Socket Creation Error: ");
+            return -1;
+        }
+
+        struct timeval timeout;
+        timeout.tv_sec = timeoutmillis/1000;
+        timeoutmillis -= timeoutmillis/1000;
+        timeout.tv_usec = timeoutmillis*1000;
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(socketStructure->socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
         
+        //Preparing Server Structure
+        memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(servicePort);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+
+        //Binding Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
+            perror("Binding Error: ");
+            udp_close(socketStructure);
+            return -2;
+        }
+
+        return 0;
     }
     int udp_receive(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote){
         unsigned int rcvlen = sizeof(*remote);
