@@ -1,2 +1,2 @@
 # EasySocket
-An .h with that semplify Socket programming in C
+An .h that semplify Socket programming in C
