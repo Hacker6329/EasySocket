@@ -23,18 +23,20 @@
 
     //Functions Pre-Declaration: TCP
     int tcp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote);
-    int tcp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local);
+    int tcp_init_server(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog);
     int tcp_accept(EasySocket* serverSocketStructure, EasySocket* socketStructure, struct sockaddr_in* remote);
     int tcp_receive(EasySocket* socketStructure, void* buffer, int bufferSize);
     int tcp_send(EasySocket* socketStructure, void* buffer, int bufferSize);
-    int tcp_close(EasySocket* socketStructure);
+    void tcp_close(EasySocket* socketStructure);
+    void tcp_close_and_cleanup(EasySocket* socketStructure);
 
     //Functions Pre-Declaration: UDP
 	int udp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote);
 	int udp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local);
 	int udp_receive(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote);
 	int udp_send(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote);
-	int udp_close(EasySocket* socketStructure);
+	void udp_close(EasySocket* socketStructure);
+    void udp_close_and_cleanup(EasySocket* socketStructure);
 
     //Function Declaration: Universal
     int easy_select(fd_set* readSet, fd_set* writeSet, fd_set* exceptSet, struct timeval* timeout){
@@ -42,23 +44,138 @@
     }
 
     //Functions Declaration: TCP
-    //TODO
+    int tcp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote){
+        
+        //Starting Up WSA
+        struct WSAData data;
+        if(WSAStartup( MAKEWORD(2, 2), &data) != 0) {
+            printf("WSA Startup Failed. Error Code: %d\n",WSAGetLastError());
+            return WSAGetLastError();
+        }
+
+        //Creating Socket
+        if ((socketStructure->socketFD = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
+            printf("Cannot create socket: %d\n", WSAGetLastError());
+            tcp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+        //Preparing Local Structure
+		memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(INADDR_ANY);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+
+        //Binding Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR) {
+            printf("Cannot bind socket: %d\n", WSAGetLastError());
+            tcp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+		//Preparing Remote Structure
+        memset(remote, 0, sizeof(*remote));
+        remote->sin_family = AF_INET;
+        remote->sin_addr.S_un.S_addr = inet_addr(serviceName);
+        remote->sin_port = htons(servicePort);
+
+        //Connecting to Server
+        if (connect(socketStructure->socketFD, (struct sockaddr*)remote, sizeof(*remote)) == SOCKET_ERROR) {
+            printf("Cannot connect to server: %d\n", WSAGetLastError());
+            tcp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+        return 0;
+    }
+    int tcp_init_server(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog){
+
+        //Starting Up WSA
+        struct WSAData data;
+        if(WSAStartup( MAKEWORD(2, 2), &data) != 0) {
+            printf("WSA Startup Failed. Error Code: %d\n",WSAGetLastError());
+            return WSAGetLastError();
+        }
+
+        //Creating Socket
+        if ((serverSocketStructure->socketFD = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET) {
+            printf("Cannot create socket: %d\n", WSAGetLastError());
+            tcp_close(serverSocketStructure);
+            return WSAGetLastError();
+        }
+
+        //Preparing Server Structure
+		memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(servicePort);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+        
+        //Binding Socket to Local Structure
+        if (bind(serverSocketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR) {
+            printf("Cannot bind socket: %d\n", WSAGetLastError());
+            tcp_close(serverSocketStructure);
+            return WSAGetLastError();
+        }
+
+        //Turning ServerSocket in Listening
+        listen(serverSocketStructure->socketFD, backlog);
+
+        return 0;
+    }
+    int tcp_accept(EasySocket* serverSocketStructure, EasySocket* socketStructure, struct sockaddr_in* remote){
+        unsigned int remotelen = sizeof(*remote);
+        int socketFD = accept(serverSocketStructure->socketFD, (struct sockaddr*)remote, &remotelen);
+        if(socketFD == SOCKET_ERROR) {
+            return SOCKET_ERROR;
+        }
+        socketStructure->socketFD = socketFD;
+        return 0;
+    }
+    int tcp_receive(EasySocket* socketStructure, void* buffer, int bufferSize){
+        return recv(socketStructure->socketFD, buffer, bufferSize, 0);
+    }
+    int tcp_send(EasySocket* socketStructure, void* buffer, int bufferSize){
+        return send(socketStructure->socketFD, buffer, bufferSize, 0);
+    }
+    void tcp_close(EasySocket* socketStructure){
+        closesocket(socketStructure->socketFD);
+    }
+    void tcp_close_and_cleanup(EasySocket* socketStructure){
+        tcp_close(socketStructure);
+        WSACleanup();
+    }
     
     //Functions Declaration: UDP
     int udp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote){
         
+        //Starting Up WSA
         struct WSAData data;
-        if(WSAStartup( MAKEWORD(2, 2), &data) != 0){
-            printf("Failed. Error Code: %d\n",WSAGetLastError());
+        if(WSAStartup( MAKEWORD(2, 2), &data) != 0) {
+            printf("WSA Startup Failed. Error Code: %d\n",WSAGetLastError());
             return WSAGetLastError();
         }
 
-        if((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET){
-            printf("Could not create socket: %d\n", WSAGetLastError());
+        //Creating Socket
+        if((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
+            printf("Cannot create socket: %d\n", WSAGetLastError());
+            udp_close(socketStructure);
             return WSAGetLastError();
         }
 
-        //Prepare Remote Structure
+        //Preparing Local Structure
+        memset(local, 0, sizeof(*local));
+        local->sin_family = AF_INET;
+        local->sin_port = htons(INADDR_ANY);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
+
+        //Binding Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR) {
+            printf("Could not bind socket: %d\n", WSAGetLastError());
+            udp_close(socketStructure);
+            return WSAGetLastError();
+        }
+
+        //Preparing Remote Structure
         memset(remote, 0, sizeof(*remote));
         remote->sin_family = AF_INET;
         remote->sin_addr.S_un.S_addr = inet_addr(serviceName);
@@ -68,25 +185,30 @@
     }
     int udp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local){
 
+        //Starting Up WSA
         struct WSAData data;
-        if(WSAStartup(MAKEWORD(2,2), &data) != 0){
+        if(WSAStartup(MAKEWORD(2,2), &data) != 0) {
             printf("Failed. Error Code: %d\n", WSAGetLastError());
             return WSAGetLastError();
         }
 
-        if((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET){
+        //Creating Socket
+        if((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET) {
             printf("Could not create socket: %d\n", WSAGetLastError());
+            udp_close(socketStructure);
             return WSAGetLastError();
         }
 
-        //Prepare Server Structure
+        //Preparing Server Structure
         memset(local, 0, sizeof(*local));
         local->sin_family = AF_INET;
         local->sin_addr.s_addr = ADDR_ANY;
         local->sin_port = htons(servicePort);
 
-        if(bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR){
-            printf("Bind failed with error code: %d\n", WSAGetLastError());
+        //Bind Socket to Local Structure
+        if(bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) == SOCKET_ERROR) {
+            printf("Cannot bind socket: %d\n", WSAGetLastError());
+            udp_close(socketStructure);
             return WSAGetLastError();
         }
 
@@ -96,7 +218,7 @@
         memset(buffer,0, bufferSize);
         int rcvlen = sizeof(*remote);
         int esito;
-        if((esito = recvfrom(socketStructure->socketFD, buffer, bufferSize, 0, (struct sockaddr*)remote, &rcvlen)) == SOCKET_ERROR){
+        if((esito = recvfrom(socketStructure->socketFD, buffer, bufferSize, 0, (struct sockaddr*)remote, &rcvlen)) == SOCKET_ERROR) {
             return WSAGetLastError();
         }else{
             return esito;
@@ -104,14 +226,17 @@
     }
     int udp_send(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote){
         int esito;
-        if((esito = sendto(socketStructure->socketFD, buffer, bufferSize, 0, (struct sockaddr*)remote, sizeof(*remote))) == SOCKET_ERROR){
+        if((esito = sendto(socketStructure->socketFD, buffer, bufferSize, 0, (struct sockaddr*)remote, sizeof(*remote))) == SOCKET_ERROR) {
             return WSAGetLastError();
         }else{
             return esito;
         }
     }
-    int udp_close(EasySocket* socketStructure){
+    void udp_close(EasySocket* socketStructure){
         closesocket(socketStructure->socketFD);
+    }
+    void udp_close_and_cleanup(EasySocket* socketStructure){
+        udp_close(socketStructure);
         WSACleanup();
     }
 
@@ -141,14 +266,16 @@
     int tcp_accept(EasySocket* serverSocketStructure, EasySocket* socketStructure, struct sockaddr_in* remote);
     int tcp_receive(EasySocket* socketStructure, void* buffer, int bufferSize);
     int tcp_send(EasySocket* socketStructure, void* buffer, int bufferSize);
-    int tcp_close(EasySocket* socketStructure);
+    void tcp_close(EasySocket* socketStructure);
+    void tcp_close_and_cleanup(EasySocket* socketStructure);
 
     //Functions Pre-Declaration: UDP
 	int udp_init_client(EasySocket* socketStructure, char* serviceName, int servicePort, struct sockaddr_in* local, struct sockaddr_in* remote);
 	int udp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local);
 	int udp_receive(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote);
 	int udp_send(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote);
-	int udp_close(EasySocket* socketStructure);
+	void udp_close(EasySocket* socketStructure);
+    void udp_close_and_cleanup(EasySocket* socketStructure);
 
     //Function Declaration: Universal
     int easy_select(fd_set* readSet, fd_set* writeSet, fd_set* exceptSet, struct timeval* timeout){
@@ -160,30 +287,36 @@
         
         struct hostent *h;
 
+        //Creating Socket
         if ((socketStructure->socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
             perror ("Creazione Socket: ");
             return -1;
         }
 
+        //Preparing Local Structure
 		memset(local, 0, sizeof(*local));
         local->sin_family = AF_INET;
         local->sin_port = htons(INADDR_ANY);
         local->sin_addr.s_addr = htonl(INADDR_ANY);
-        if (bind (socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
+
+        //Bind Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
             perror ("errore Bind: ");
-            close(socketStructure->socketFD);
+            tcp_close(socketStructure);
             return -2;
         }
 
+        //Preparing Remote Structure
 		memset(remote, 0, sizeof(*remote));
         remote->sin_family = AF_INET;
         remote->sin_port = htons(servicePort);
         h = gethostbyname(serviceName);
         remote->sin_addr.s_addr = *((int*) h->h_addr_list[0]);
 
+        //Connecting to Server
         if (connect (socketStructure->socketFD, (struct sockaddr*)remote, sizeof(*remote)) < 0) {
-            perror ("errore Sendro: ");
-            close(socketStructure->socketFD);
+            perror("errore Sendro: ");
+            tcp_close(socketStructure);
             return -3;
         }
 
@@ -191,22 +324,26 @@
     }
     int tcp_init_server(EasySocket* serverSocketStructure, int servicePort, struct sockaddr_in* local, int backlog){
 
+        //Creating Socket
         if ((serverSocketStructure->socketFD = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-            perror ("Creazione Socket: ");
+            perror("Creazione Socket: ");
             return -1;
         }
 
+        //Preparing Local Structure
 		memset(local, 0, sizeof(*local));
         local->sin_family = AF_INET;
         local->sin_port = htons(servicePort);
         local->sin_addr.s_addr = htonl(INADDR_ANY);
         
-        if (bind (serverSocketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
-            perror ("errore Bind: ");
-            close(serverSocketStructure->socketFD);
+        //Bind Socket to Local Structure
+        if(bind(serverSocketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
+            perror("errore Bind: ");
+            tcp_close(serverSocketStructure);
             return -2;
         }
 
+        //Turning ServerSocket in Listening
         listen(serverSocketStructure->socketFD, backlog);
 
         return 0;
@@ -226,8 +363,11 @@
     int tcp_send(EasySocket* socketStructure, void* buffer, int bufferSize){
         return send(socketStructure->socketFD, buffer, bufferSize, 0);
     }
-    int tcp_close(EasySocket* socketStructure){
-        return close(socketStructure->socketFD);
+    void tcp_close(EasySocket* socketStructure){
+        close(socketStructure->socketFD);
+    }
+    void tcp_close_and_cleanup(EasySocket* socketStructure){
+        tcp_close(socketStructure);
     }
 
     //Functions Declaration: UDP
@@ -235,28 +375,29 @@
         
         struct hostent *h;
 
-        // Crea il socket della famiglia IPv4 di tipo Datagram (UDP)
-        if ((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) < 0) { // AF_INET  Address Family IPv4   
-            perror ("Socket Creation Error: ");
+        //Creating Socket
+        if((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+            perror("Socket Creation Error: ");
             return -1;
         }
 
+        //Preparing Local Structure
         memset(local, 0, sizeof(*local));
         local->sin_family = AF_INET;                
-        local->sin_port = htons(INADDR_ANY);         // Il sistema sceglie la porta
-        local->sin_addr.s_addr = htonl(INADDR_ANY);  // Utilizza qualunque interfaccia
+        local->sin_port = htons(INADDR_ANY);
+        local->sin_addr.s_addr = htonl(INADDR_ANY);
         
-        // Configura il socket con l'indirizzo locale
-        if (bind (socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
-            perror ("Binding Error: ");
+        //Binding Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
+            perror("Binding Error: ");
             udp_close(socketStructure);
             return -2;
         }
 
-        // Compila l'indirizzo remoto
+        //Preparing Remote Structure
         memset(remote, 0, sizeof(*remote));
-        remote->sin_family = AF_INET; // Address Family IPv4
-        remote->sin_port = htons(servicePort); // Chiamerò la porta del servizio
+        remote->sin_family = AF_INET;
+        remote->sin_port = htons(servicePort);
         h = gethostbyname(serviceName);
         remote->sin_addr.s_addr = *((int*) h->h_addr_list[0]);
 
@@ -264,20 +405,21 @@
     }
     int udp_init_server(EasySocket* socketStructure, int servicePort, struct sockaddr_in* local){
         
-        // Crea il socket della famiglia IPv4 di tipo Datagram (UDP)
+        //Creating Socket
         if ((socketStructure->socketFD = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-            perror ("Socket Creation Error: ");
+            perror("Socket Creation Error: ");
             return -1;
         }
         
-        // compila indirizzo del server
+        //Preparing Server Structure
         memset(local, 0, sizeof(*local));
         local->sin_family = AF_INET;
         local->sin_port = htons(servicePort);
         local->sin_addr.s_addr = htonl(INADDR_ANY);
 
-        if (bind (socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
-            perror ("Binding Error: ");
+        //Binding Socket to Local Structure
+        if (bind(socketStructure->socketFD, (struct sockaddr*)local, sizeof(*local)) < 0) {
+            perror("Binding Error: ");
             udp_close(socketStructure);
             return -2;
         }
@@ -292,8 +434,11 @@
     int udp_send(EasySocket* socketStructure, void* buffer, int bufferSize, struct sockaddr_in* remote){
         return sendto(socketStructure->socketFD, buffer, bufferSize, 0, (struct sockaddr*)remote, sizeof(*remote));
     }
-    int udp_close(EasySocket* socketStructure){
+    void udp_close(EasySocket* socketStructure){
         close(socketStructure->socketFD);
+    }
+    void udp_close_and_cleanup(EasySocket* socketStructure){
+        udp_close(socketStructure);
     }
     #endif
 #endif
